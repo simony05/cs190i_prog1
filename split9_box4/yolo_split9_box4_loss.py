@@ -16,7 +16,6 @@ class YOLOv1_loss(nn.Module):
     def forward(self, predictions, target):
         predictions = predictions.reshape(-1, self.split_size, self.split_size, self.num_classes + self.num_boxes * 5)
 
-        # IoU for 4 bounding boxes
         iou_b1 = intersection_over_union(predictions[..., 21:25], target[..., 21:25])
         iou_b2 = intersection_over_union(predictions[..., 26:30], target[..., 21:25])
         iou_b3 = intersection_over_union(predictions[..., 31:35], target[..., 21:25])

@@ -5,18 +5,18 @@ import torchvision.transforms.functional as FT
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from yolo_split9_box4_model import YOLOv1_model
-from dataset_split9_box4 import VOCDataset
+from YOLOv1_model import YOLOv1_model
+from dataset import VOCDataset
 import time
 import matplotlib.pyplot as plt
-from utils_split9_box4 import (
+from utils import (
     non_max_suppression,
     mean_average_precision,
     intersection_over_union,
     cellboxes_to_boxes,
     get_bboxes
 )
-from yolo_split9_box4_loss import YOLOv1_loss
+from YOLOv1_loss import YOLOv1_loss
 
 seed = 123
 torch.manual_seed(seed)
@@ -31,6 +31,7 @@ NUM_WORKERS = 2
 PIN_MEMORY = True
 IMG_DIR = "../dataset/images"
 LABEL_DIR = "../dataset/labels"
+
 
 class Compose(object):
     def __init__(self, transforms):
@@ -63,12 +64,12 @@ def train_fn(train_loader, model, optimizer, loss_fn):
         loop.set_postfix(loss = loss.item())
 
     print(f" Mean loss was {sum(mean_loss)/len(mean_loss)}")
-    
+
     return sum(mean_loss)/len(mean_loss)
 
 
 def main():
-    model = YOLOv1_model(split_size = 9, num_boxes = 4, num_classes = 20).to(DEVICE)
+    model = YOLOv1_model(split_size = 7, num_boxes = 2, num_classes = 20).to(DEVICE)
     optimizer = optim.Adam(
         model.parameters(), lr = LEARNING_RATE, weight_decay = WEIGHT_DECAY
     )
@@ -76,6 +77,7 @@ def main():
     loss_fn = YOLOv1_loss()
 
     train_dataset = VOCDataset(
+        # "./dataset/100examples.csv",
         "../dataset/train.csv",
         transform = transform,
         img_dir = IMG_DIR,
@@ -83,9 +85,9 @@ def main():
     )
 
     test_dataset = VOCDataset(
-        "../dataset/test.csv",
-        transform = transform,
-        img_dir = IMG_DIR,
+        "../dataset/test.csv", 
+        transform = transform, 
+        img_dir = IMG_DIR, 
         label_dir = LABEL_DIR,
     )
 
@@ -160,6 +162,8 @@ def main():
     plt.tight_layout()
     plt.savefig("loss.png")
     plt.show()
+
+
 
 if __name__ == "__main__":
     main()

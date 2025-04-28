@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as transforms
 import torch.optim as optim
 import torchvision.transforms.functional as FT
+from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from YOLOv1_model import YOLOv1_model
@@ -21,15 +22,15 @@ seed = 123
 torch.manual_seed(seed)
 
 # hyperparameters
-LEARNING_RATE = 2e-5
+LEARNING_RATE = 1e-4
 DEVICE = "cuda" if torch.cuda.is_available else "cpu"
 BATCH_SIZE = 16
-WEIGHT_DECAY = 0
+WEIGHT_DECAY = 5e-4
 EPOCHS = 100
 NUM_WORKERS = 2
 PIN_MEMORY = True
-IMG_DIR = "./dataset/images"
-LABEL_DIR = "./dataset/labels"
+IMG_DIR = "../dataset/images"
+LABEL_DIR = "../dataset/labels"
 
 
 class Compose(object):
@@ -72,18 +73,19 @@ def main():
     optimizer = optim.Adam(
         model.parameters(), lr = LEARNING_RATE, weight_decay = WEIGHT_DECAY
     )
+    scheduler = StepLR(optimizer, step_size = 30, gamma = 0.1)
     loss_fn = YOLOv1_loss()
 
     train_dataset = VOCDataset(
         # "./dataset/100examples.csv",
-        "./dataset/train.csv",
+        "../dataset/train.csv",
         transform = transform,
         img_dir = IMG_DIR,
         label_dir = LABEL_DIR,
     )
 
     test_dataset = VOCDataset(
-        "./dataset/test.csv", 
+        "../dataset/test.csv", 
         transform = transform, 
         img_dir = IMG_DIR, 
         label_dir = LABEL_DIR,
@@ -125,7 +127,16 @@ def main():
         map_scores.append(mean_avg_prec)
 
         loss = train_fn(train_loader, model, optimizer, loss_fn)
+
+        scheduler.step()
+
         losses.append(loss)
+
+        with open("map_scores.txt", "a") as f:
+            f.write(f"{mean_avg_prec}\n")
+
+        with open("avg_loss.txt", "a") as f:
+            f.write(f"{loss}\n")
 
     total_end = time.time()
     total_time = total_end - total_start
@@ -151,14 +162,6 @@ def main():
     plt.tight_layout()
     plt.savefig("loss.png")
     plt.show()
-
-    with open("map_scores_split7_box2.txt", "w") as f:
-        for score in map_scores:
-            f.write(f"{score}\n")
-
-    with open("avg_loss_split7_box2.txt", "w") as f:
-        for loss in losses:
-            f.write(f"{loss}\n")
 
 
 

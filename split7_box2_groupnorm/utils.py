@@ -5,7 +5,7 @@ import matplotlib.patches as patches
 from collections import Counter
 
 def intersection_over_union(boxes_preds, boxes_labels, box_format = "midpoint"):
-
+    
     if box_format == "midpoint":
         box1_x1 = boxes_preds[..., 0:1] - boxes_preds[..., 2:3] / 2
         box1_y1 = boxes_preds[..., 1:2] - boxes_preds[..., 3:4] / 2
@@ -31,6 +31,7 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format = "midpoint"):
     x2 = torch.min(box1_x2, box2_x2)
     y2 = torch.min(box1_y2, box2_y2)
 
+    # .clamp(0) is for the case when they do not intersect
     intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
 
     box1_area = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1))
@@ -40,6 +41,7 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format = "midpoint"):
 
 
 def non_max_suppression(bboxes, iou_threshold, threshold, box_format = "corners"):
+    # select best bounding box out of overlapping boxes
 
     assert type(bboxes) == list
 
@@ -66,9 +68,12 @@ def non_max_suppression(bboxes, iou_threshold, threshold, box_format = "corners"
 
     return bboxes_after_nms
 
+
 def mean_average_precision(
     pred_boxes, true_boxes, iou_threshold = 0.5, box_format = "midpoint", num_classes = 20
 ):
+    # mAP: confusion matrix (TP, TN, FP, FN), IoU (bounding box and ground truth IoU > 0.5), precision + recall using IoU
+
     average_precisions = []
 
     epsilon = 1e-6
@@ -94,7 +99,7 @@ def mean_average_precision(
         TP = torch.zeros((len(detections)))
         FP = torch.zeros((len(detections)))
         total_true_bboxes = len(ground_truths)
-
+        
         if total_true_bboxes == 0:
             continue
 
@@ -118,12 +123,15 @@ def mean_average_precision(
                     best_gt_idx = idx
 
             if best_iou > iou_threshold:
+                # only detect ground truth detection once
                 if amount_bboxes[detection[0]][best_gt_idx] == 0:
+                    # true positive and add this bounding box to seen
                     TP[detection_idx] = 1
                     amount_bboxes[detection[0]][best_gt_idx] = 1
                 else:
                     FP[detection_idx] = 1
 
+            # if IoU is lower then the detection is a false positive
             else:
                 FP[detection_idx] = 1
 
@@ -137,6 +145,7 @@ def mean_average_precision(
 
     return sum(average_precisions) / len(average_precisions)
 
+
 def get_bboxes(
     loader,
     model,
@@ -149,6 +158,7 @@ def get_bboxes(
     all_pred_boxes = []
     all_true_boxes = []
 
+    # make sure model is in eval before get bboxes
     model.eval()
     train_idx = 0
 
@@ -184,39 +194,27 @@ def get_bboxes(
     return all_pred_boxes, all_true_boxes
 
 
+def convert_cellboxes(predictions, S=7):
 
-def convert_cellboxes(predictions, S=9):
     predictions = predictions.to("cpu")
     batch_size = predictions.shape[0]
-    predictions = predictions.reshape(batch_size, S, S, 40)
-
-    bboxes = [
-        predictions[..., 21 + i * 5 : 25 + i * 5] for i in range(4)
-    ]
-    confidences = [
-        predictions[..., 20 + i * 5].unsqueeze(0) for i in range(4)
-    ]
-
-    scores = torch.cat(confidences, dim=0)
+    predictions = predictions.reshape(batch_size, 7, 7, 30)
+    bboxes1 = predictions[..., 21:25]
+    bboxes2 = predictions[..., 26:30]
+    scores = torch.cat(
+        (predictions[..., 20].unsqueeze(0), predictions[..., 25].unsqueeze(0)), dim=0
+    )
     best_box = scores.argmax(0).unsqueeze(-1)
-
-    best_boxes = sum([
-        bbox * (best_box == i) for i, bbox in enumerate(bboxes)
-    ])
-
-    cell_indices = torch.arange(S).repeat(batch_size, S, 1).unsqueeze(-1)
-    x = 1 / S * (best_boxes[..., 0:1] + cell_indices)
+    best_boxes = bboxes1 * (1 - best_box) + best_box * bboxes2
+    cell_indices = torch.arange(7).repeat(batch_size, 7, 1).unsqueeze(-1)
+    x = 1 / S * (best_boxes[..., :1] + cell_indices)
     y = 1 / S * (best_boxes[..., 1:2] + cell_indices.permute(0, 2, 1, 3))
     w_y = 1 / S * best_boxes[..., 2:4]
-
     converted_bboxes = torch.cat((x, y, w_y), dim=-1)
     predicted_class = predictions[..., :20].argmax(-1).unsqueeze(-1)
-
-    best_confidence = sum([
-        conf.squeeze(0).unsqueeze(-1) * (best_box == i)
-        for i, conf in enumerate(confidences)
-    ])
-
+    best_confidence = torch.max(predictions[..., 20], predictions[..., 25]).unsqueeze(
+        -1
+    )
     converted_preds = torch.cat(
         (predicted_class, best_confidence, converted_bboxes), dim=-1
     )
@@ -224,14 +222,14 @@ def convert_cellboxes(predictions, S=9):
     return converted_preds
 
 
-
-def cellboxes_to_boxes(out, S=9):
-    converted_pred = convert_cellboxes(out, S=S).reshape(out.shape[0], S * S, -1)
+def cellboxes_to_boxes(out, S=7):
+    converted_pred = convert_cellboxes(out).reshape(out.shape[0], S * S, -1)
     converted_pred[..., 0] = converted_pred[..., 0].long()
     all_bboxes = []
 
     for ex_idx in range(out.shape[0]):
         bboxes = []
+
         for bbox_idx in range(S * S):
             bboxes.append([x.item() for x in converted_pred[ex_idx, bbox_idx, :]])
         all_bboxes.append(bboxes)
